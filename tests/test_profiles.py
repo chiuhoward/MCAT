@@ -16,8 +16,8 @@ from mcat.profiles import _assign, _mahalanobis, _weights, tract_profiles, write
 
 # --- weighted geometry and estimator --------------------------------------------------------
 
-# pyAFQ AFQ/tests/test_fixes.py::test_mahal_fix (tractometry/pyAFQ@65a43a88): 20 streamlines,
-# two nodes each, and the Mahalanobis distances pyAFQ pins for the first three streamlines.
+# pyAFQ's test_mahal_fix: 20 streamlines, two nodes each, and the Mahalanobis distances pyAFQ
+# pins for the first three streamlines.  https://github.com/tractometry/pyAFQ/blob/65a43a88ff1cf1e681a04a47010c9bb8dbb07ed8/AFQ/tests/test_fixes.py#L55-L91
 MAHAL_SLS = np.array([
     [[30, 41, 61], [28, 61, 38]], [[30, 41, 62], [20, 44, 34]], [[50, 67, 88], [10, 10, 20]],
     [[35, 43, 65], [25, 55, 35]], [[40, 50, 70], [15, 15, 25]], [[45, 54, 75], [12, 22, 32]],

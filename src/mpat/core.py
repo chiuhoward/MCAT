@@ -63,16 +63,15 @@ def _resample(xyz, n):
 
 
 def _support(dn, floor):
-    """Voxels with density above floor x peak, in the connected component holding the peak."""
+    """Voxels with density above floor x peak, in the connected component holding the peak
+    (moved unchanged out of bundle_core, which mcat.profiles shares it with)."""
     from scipy.ndimage import label
 
     lab, _ = label(dn > floor, np.ones((3, 3, 3)))
     return lab == lab[np.unravel_index(np.argmax(dn), dn.shape)]
 
 
-def _graph(cost_vox, keep, vox_mm, lin_part=None):
-    """26-neighbour graph of ``keep``; a step's length is |offset| x vox_mm, or |lin @ offset| mm
-    when the affine's linear part ``lin_part`` is given (anisotropic or sheared grids)."""
+def _graph(cost_vox, keep, vox_mm):
     import scipy.sparse as sps
 
     idx = np.argwhere(keep)

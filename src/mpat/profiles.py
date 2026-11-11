@@ -67,7 +67,8 @@ def _assign(dn, keep, affine, xyz):
 
 def _mahalanobis(x, d):
     """Mahalanobis distance of each x_i from the d-weighted mean, in the d-weighted population
-    covariance (pseudo-inverted)."""
+    covariance (pseudo-inverted).  pyAFQ's ``gaussian_weights`` (population covariance, pinvh),
+    with every sum weighted by d: https://github.com/tractometry/pyAFQ/blob/65a43a88ff1cf1e681a04a47010c9bb8dbb07ed8/AFQ/_fixes.py#L335-L350"""
     from scipy.linalg import pinvh
 
     r = x - d @ x / d.sum()
@@ -85,7 +86,7 @@ def _weights(x, d, owner, n):
             continue
         with np.errstate(divide="ignore", invalid="ignore"):
             wk = d[i] / _mahalanobis(x[i], d[i])
-        wk[~np.isfinite(wk)] = 0
+        wk[~np.isfinite(wk)] = 0   # pyAFQ's: https://github.com/tractometry/pyAFQ/blob/65a43a88ff1cf1e681a04a47010c9bb8dbb07ed8/AFQ/_fixes.py#L355-L357
         w[i] = wk if wk.sum() > 0 else d[i]
     return w
 

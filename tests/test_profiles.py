@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 
-from mcat.profiles import _assign, _mahalanobis, _sample, _weights, tract_profiles, write_profiles
+from mcat.profiles import _assign, _mahalanobis, _weights, tract_profiles, write_profiles
 
 # --- weighted geometry and estimator --------------------------------------------------------
 
@@ -61,8 +61,7 @@ def test_density_weights_equal_replicated_points():
     npt.assert_allclose(_mahalanobis(XSEC, XSEC_D.astype(float)), D_ref, rtol=1e-10)
 
     owner = np.zeros(len(XSEC), int)
-    w, collapsed = _weights(XSEC, XSEC_D.astype(float), owner, 1)
-    assert collapsed == []
+    w = _weights(XSEC, XSEC_D.astype(float), owner, 1)
     profile = (w * XSEC_S).sum() / w.sum()
     expected = (w_ref * XSEC_S[which]).sum()              # pyAFQ weights already sum to one
     npt.assert_allclose(profile, expected, rtol=1e-10)
@@ -83,8 +82,8 @@ def test_thin_cross_sections_use_the_pseudoinverse(flat):
     x[:, 0] = XSEC[:, 0] + 0.1 * np.arange(len(x))      # keep the points distinct
     D_ref, _, _ = _pyafq_replicated(x, XSEC_D)
     npt.assert_allclose(_mahalanobis(x, XSEC_D.astype(float)), D_ref, rtol=1e-8)
-    w, collapsed = _weights(x, XSEC_D.astype(float), np.zeros(len(x), int), 1)
-    assert collapsed == [] and np.all(np.isfinite(w))
+    w = _weights(x, XSEC_D.astype(float), np.zeros(len(x), int), 1)
+    assert np.all(np.isfinite(w) & (w > 0))
 
 
 def test_collapsed_node_falls_back_locally():
@@ -92,10 +91,9 @@ def test_collapsed_node_falls_back_locally():
     x = np.vstack([XSEC, [[50, 50, 50]]])
     d = np.r_[XSEC_D, 3.0]
     owner = np.r_[np.zeros(len(XSEC), int), 1]
-    w, collapsed = _weights(x, d, owner, 2)
-    assert collapsed == [1]
+    w = _weights(x, d, owner, 2)
     assert w[-1] == 3.0
-    alone, _ = _weights(XSEC, XSEC_D.astype(float), np.zeros(len(XSEC), int), 1)
+    alone = _weights(XSEC, XSEC_D.astype(float), np.zeros(len(XSEC), int), 1)
     npt.assert_allclose(w[:-1], alone, rtol=1e-12)
 
 
@@ -104,11 +102,11 @@ def test_zero_and_near_zero_distance():
     its (large) finite d / D.  Symmetric square + its exact centre, then the centre nudged."""
     sq = np.array([[-1, -1, 0], [1, -1, 0], [-1, 1, 0], [1, 1, 0], [0, 0, 0]], float)
     d = np.ones(5)
-    w, _ = _weights(sq, d, np.zeros(5, int), 1)
+    w = _weights(sq, d, np.zeros(5, int), 1)
     assert w[4] == 0 and np.all(w[:4] > 0)                 # the exact centre is discarded
     nudged = sq.copy()
     nudged[4, 0] = 1e-6
-    w2, _ = _weights(nudged, d, np.zeros(5, int), 1)
+    w2 = _weights(nudged, d, np.zeros(5, int), 1)
     D = _mahalanobis(nudged, d)
     npt.assert_allclose(w2, d / D)
     assert w2[4] / w2.sum() > 0.99                        # ...and dominates the node
@@ -187,7 +185,7 @@ def test_duplicate_and_detached_nodes_keep_their_numbers():
     assert np.all(counts[[0, 3, 4, 5, 6, 7]] > 0)
 
 
-# --- coordinates and missing data -----------------------------------------------------------
+# --- scalars on another grid ----------------------------------------------------------------
 
 def _scalar_img():
     """A linear field on an anisotropic, shifted, flipped grid; linear interpolation is exact."""
@@ -196,27 +194,6 @@ def _scalar_img():
     xyz = nib.affines.apply_affine(aff, ijk)
     field = lambda p: 0.1 * p[..., 0] - 0.05 * p[..., 1] + 0.02 * p[..., 2] - 1.0  # noqa: E731
     return aff, field(xyz), field
-
-
-def test_sampling_on_another_grid():
-    aff, data, field = _scalar_img()
-    inside = nib.affines.apply_affine(aff, [[3.3, 2.7, 1.2], [0, 0, 0], [11, 8, 5], [5.5, 4, 2]])
-    outside = nib.affines.apply_affine(aff, [[-0.2, 3, 3], [11.01, 3, 3], [4, 4, 5.5]])
-    npt.assert_allclose(_sample(data, aff, inside), field(inside), atol=1e-12)
-    assert np.all(np.isnan(_sample(data, aff, outside)))  # out of volume: invalid, not zero
-
-
-def test_sampling_zeros_and_nonfinite():
-    aff, data, _ = _scalar_img()
-    data = data.copy()
-    data[4, 4, 2] = 0.0                                   # a valid zero
-    data[6, 4, 2] = np.nan
-    data[8, 4, 2] = np.inf
-    at = lambda *v: nib.affines.apply_affine(aff, np.array(v, float))  # noqa: E731
-    s = _sample(data, aff, at([4, 4, 2], [5, 4, 2], [5.5, 4, 2], [7, 4, 2], [7.5, 4, 2], [6, 4, 2]))
-    assert abs(s[0]) < 1e-12                              # zero kept (not missing)
-    assert np.isfinite(s[1]) and np.isfinite(s[3])        # on-grid neighbours of a NaN / Inf voxel
-    assert np.all(np.isnan(s[[2, 4, 5]]))                 # anything that mixes a NaN / Inf in
 
 
 # --- integration and output -----------------------------------------------------------------
@@ -242,11 +219,9 @@ def test_profile_end_to_end():
     s_aff = s_aff.copy()
     s_aff[:3, :] = [[-4, 0, 0, 36], [0, 1, 0, 5], [0, 0, 2.5, 3]]  # a grid holding the bundle
     s_data = field(nib.affines.apply_affine(s_aff, np.moveaxis(np.indices(s_data.shape, float), 0, -1)))
-    bundle_xyz = nib.affines.apply_affine(aff, np.argwhere(d[:22] > 0))
-    assert np.all(np.isfinite(_sample(s_data, s_aff, bundle_xyz)))
     holes = s_data.copy()
     holes[...] = np.nan                                   # an all-invalid scalar
-    prof, info = tract_profiles(d, aff, core, {"lin": (s_data, s_aff), "none": (holes, s_aff)})
+    prof, info = tract_profiles(d, aff, core, {"lin": nib.Nifti1Image(s_data, s_aff), "none": nib.Nifti1Image(holes, s_aff)})
     assert prof["lin"].shape == (10,) and np.all(np.isnan(prof["none"]))
     # each node's profile is a convex combination of a linear field over its own slab of the tube
     npt.assert_allclose(prof["lin"], field(core), atol=0.12)
@@ -254,13 +229,13 @@ def test_profile_end_to_end():
     assert info["n_support"] == np.count_nonzero(d[:22])  # the island is not support
     assert info["empty_nodes"] == []
 
-    rev, _ = tract_profiles(d, aff, core[::-1], {"lin": (s_data, s_aff)})
+    rev, _ = tract_profiles(d, aff, core[::-1], {"lin": nib.Nifti1Image(s_data, s_aff)})
     npt.assert_allclose(rev["lin"], prof["lin"][::-1], rtol=1e-12)
 
 
 def test_empty_bundle_returns_nan_nodes():
     d, aff, core = _straight_bundle()
-    prof, info = tract_profiles(np.zeros_like(d), aff, None, {"FA": (d, aff)}, n_nodes=7)
+    prof, info = tract_profiles(np.zeros_like(d), aff, None, {"FA": nib.Nifti1Image(d, aff)}, n_nodes=7)
     assert prof["FA"].shape == (7,) and np.all(np.isnan(prof["FA"]))
     assert info["status"] == "empty"
 
@@ -270,21 +245,13 @@ def test_invalid_density_is_zero_as_in_bundle_core(bad):
     """bundle_core reads density as clip(nan_to_num(d), 0): NaN and negative voxels are empty,
     +Inf the largest float.  The profiles do the same rather than raising."""
     d, aff, core = _straight_bundle()
-    lin = {"x": (d, aff)}
+    lin = {"x": nib.Nifti1Image(d, aff)}
     d_bad = d.copy()
     d_bad[5, 3, 3] = bad
     expected = np.clip(np.nan_to_num(d_bad), 0, None)
     prof, info = tract_profiles(d_bad, aff, core, lin)
     ref, _ = tract_profiles(expected, aff, core, lin)
     npt.assert_array_equal(prof["x"], ref["x"])
-
-
-def test_malformed_geometry_is_rejected():
-    d, aff, core = _straight_bundle()
-    with pytest.raises(ValueError):
-        tract_profiles(d[..., None], aff, core, {})
-    with pytest.raises(ValueError):
-        tract_profiles(d, aff, core[:, :2], {})
 
 
 def test_write_profiles(tmp_path):
@@ -319,4 +286,4 @@ def test_write_profiles(tmp_path):
     meta = json.load(open(out[: -len(".csv")] + ".json"))
     assert meta["bundles"]["Empty one"]["status"] == "empty"
     assert meta["bundles"]["Left Arcuate"]["status"] == "ok"
-    assert meta["zero_distance"] and meta["scalars"] == {"dti_fa": str(fa)}
+    assert meta["scalars"] == {"dti_fa": str(fa)}

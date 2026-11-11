@@ -90,8 +90,7 @@ def _graph(cost_vox, keep, vox_mm, lin_part=None):
         rows.append(np.flatnonzero(m))
         cols.append(j[m])
         # +1e-9: a tiny length tie-break, so zero-cost ridges still give a shortest path
-        step = np.linalg.norm(o) * vox_mm if lin_part is None else np.linalg.norm(lin_part @ o)
-        w.append(step * 0.5 * (c[m] + c[j[m]]) + 1e-9)
+        w.append(np.linalg.norm(o) * vox_mm * 0.5 * (c[m] + c[j[m]]) + 1e-9)
     G = sps.csr_matrix((np.concatenate(w), (np.concatenate(rows), np.concatenate(cols))),
                        shape=(n, n))
     return G, idx, lin

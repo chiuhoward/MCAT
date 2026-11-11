@@ -7,9 +7,10 @@ For one bundle and its core (``mcat.core``, n nodes in world mm):
 2. Assignment.  Every support voxel goes to the core node nearest to it along the bundle, in the
    metric of MCAT's own cross-sections (``bundle_core`` step 3): -log(density / peak) per mm on the
    support's 26-neighbour graph, plus its 1e-9-per-step tie-break -- one multi-source Dijkstra.
-   Step lengths are |A[:3, :3] @ offset| mm (the same as bundle_core's on isotropic grids, correct
-   on anisotropic or sheared ones).  A node enters the graph through the support voxels at the
-   eight corners of the voxel cell it lies in, at (distance in mm) x (that voxel's cost).  Nodes are
+   Step lengths are bundle_core's too: |offset in voxels| x vox_mm, vox_mm = |det A|^(1/3) (exact
+   on isotropic grids, a mean voxel size on anisotropic ones).  A node enters the graph through the
+   support voxels at the eight corners of the voxel cell it lies in, at (its distance from each, in
+   voxels x vox_mm) x (that voxel's cost).  Nodes are
    never moved, merged or renumbered: a node whose cell has no support corner (detached), one that
    coincides with another (an exact tie goes to whichever SciPy's Dijkstra settles first), or one
    closer to its neighbours than a voxel, can own no voxels -- its profile is NaN.
@@ -44,9 +45,9 @@ def _assign(dn, keep, affine, xyz):
     import scipy.sparse as sps
     from scipy.sparse.csgraph import dijkstra
 
-    A = affine[:3, :3]
+    vox_mm = float(np.abs(np.linalg.det(affine[:3, :3])) ** (1 / 3))  # as bundle_core
     cost = np.where(keep, -np.log(np.where(keep, dn, 1.0)), 0.0)   # as bundle_core's cost1
-    G, idx, lin = _graph(cost, keep, None, A)
+    G, idx, lin = _graph(cost, keep, vox_mm)
     m, n = len(idx), len(xyz)
     ijk = nib.affines.apply_affine(np.linalg.inv(affine), xyz)
     corner = np.floor(ijk).astype(np.int64)[:, None] + CELL            # (n, 8, 3)
@@ -54,7 +55,7 @@ def _assign(dn, keep, affine, xyz):
     vox = np.full(inside.shape, -1, np.int64)
     vox[inside] = lin[tuple(corner[inside].T)]
     on = vox >= 0
-    mm = np.linalg.norm((corner - ijk[:, None]) @ A.T, axis=-1)
+    mm = np.linalg.norm(corner - ijk[:, None], axis=-1) * vox_mm
     c = np.zeros(vox.shape)
     c[on] = cost[tuple(idx[vox[on]].T)]
     E = sps.csr_matrix((mm[on] * c[on] + 1e-9, (m + np.nonzero(on)[0], vox[on])), shape=(m + n, m + n))
@@ -189,7 +190,7 @@ def write_profiles(folder, scalars, out=None, n_nodes=100, floor=1e-6):
         json.dump(dict(method="density-weighted inverse Mahalanobis distance over geodesic "
                               "cross-sections of the MCAT core (mcat.profiles)",
                        assignment="nearest core node in bundle_core's cross-section metric: "
-                                  "-log(density / peak) per mm (affine step lengths)",
+                                  "-log(density / peak) per mm, |offset| x |det A|^(1/3) steps",
                        zero_distance=ZERO_DISTANCE, pseudoinverse="scipy.linalg.pinvh default cutoff",
                        support=f"density > {floor} x peak, component holding the peak",
                        node_order="nodeID 0 is the core's first node (its start end: see its json 'ends')",

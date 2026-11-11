@@ -160,15 +160,18 @@ def test_assignment_uses_mcats_density_cost():
     npt.assert_array_equal(owner[np.argsort(ijk[:, 0])], [0, 0, 0] + [1] * 8)
 
 
-def test_assignment_steps_are_physical_mm():
-    """The cost is per mm of the affine's linear part, not per voxel (or one mean voxel size).
-    On a (1, 1, 4) mm grid with uniform cost, voxel (2,0,0) is 2 mm from node A at (0,0,0) and
-    4.1 mm from node B at voxel (3,0,1); in voxels B is nearer (one diagonal step)."""
+def test_assignment_steps_match_mcat():
+    """Step lengths are bundle_core's: |offset| x vox_mm, vox_mm = |det A|^(1/3) (one mean voxel
+    size), including the step from a node to its cell's corners.  On a (1, 1, 4) mm grid vox_mm =
+    4^(1/3) = 1.587, and with cost c = ln 2 off the peak, by hand: voxel (2,0,0) is one diagonal
+    step from node B at voxel (3,0,1), sqrt(2) x 1.587 x c = 1.56, while from node A at voxel
+    (0,0,0) the cheapest route (via the zero-cost peak at (0,0,1)) is
+    sqrt(2) x 1.587 x c / 2 + 1.587 x c = 1.88.  So B owns it (physical mm would say A: 2 vs 4.1)."""
     dn = np.full((4, 1, 2), 0.5)
-    dn[0, 0, 1] = 1.0                                     # the peak: elsewhere cost is ln 2 per mm
+    dn[0, 0, 1] = 1.0                                     # the peak: elsewhere cost is ln 2
     aff = np.diag([1.0, 1.0, 4.0, 1.0])
     ijk, owner = _assign(dn, dn > 0, aff, np.array([[0, 0, 0], [3, 0, 4.0]]))
-    assert owner[np.flatnonzero((ijk == [2, 0, 0]).all(1))[0]] == 0
+    assert owner[np.flatnonzero((ijk == [2, 0, 0]).all(1))[0]] == 1
 
 
 def test_duplicate_and_detached_nodes_keep_their_numbers():

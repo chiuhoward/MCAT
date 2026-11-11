@@ -265,12 +265,26 @@ def test_empty_bundle_returns_nan_nodes():
     assert info["status"] == "empty"
 
 
-@pytest.mark.parametrize("bad", ["negative", "nan"])
-def test_invalid_density_is_rejected(bad):
+@pytest.mark.parametrize("bad", [-1.0, np.nan, np.inf])
+def test_invalid_density_is_zero_as_in_bundle_core(bad):
+    """bundle_core reads density as clip(nan_to_num(d), 0): NaN and negative voxels are empty,
+    +Inf the largest float.  The profiles do the same rather than raising."""
     d, aff, core = _straight_bundle()
-    d[5, 3, 3] = -1.0 if bad == "negative" else np.nan
+    lin = {"x": (d, aff)}
+    d_bad = d.copy()
+    d_bad[5, 3, 3] = bad
+    expected = np.clip(np.nan_to_num(d_bad), 0, None)
+    prof, info = tract_profiles(d_bad, aff, core, lin)
+    ref, _ = tract_profiles(expected, aff, core, lin)
+    npt.assert_array_equal(prof["x"], ref["x"])
+
+
+def test_malformed_geometry_is_rejected():
+    d, aff, core = _straight_bundle()
     with pytest.raises(ValueError):
-        tract_profiles(d, aff, core, {})
+        tract_profiles(d[..., None], aff, core, {})
+    with pytest.raises(ValueError):
+        tract_profiles(d, aff, core[:, :2], {})
 
 
 def test_write_profiles(tmp_path):

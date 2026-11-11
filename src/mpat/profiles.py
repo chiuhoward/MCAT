@@ -109,17 +109,15 @@ def _sample(data, affine, xyz):
 def tract_profiles(density, affine, core, scalars, n_nodes=100, floor=1e-6):
     """Profiles of one bundle: ({scalar: (n,) values}, info).
 
-    density   3-D bundle density map (finite, >= 0), affine its voxel-to-world matrix
+    density   3-D bundle density map (NaN / negative read as 0, as bundle_core does)
     core      (n, 3) core nodes in world mm (``Core.xyz``), or None for an empty bundle
     scalars   {name: nibabel image or (data, affine)}
     n_nodes   the node count when there is no core; otherwise the core's own count is kept
     """
-    d = np.asarray(density, float)
+    d = np.clip(np.nan_to_num(np.asarray(density, float)), 0, None)   # as bundle_core
     affine = np.asarray(affine, float)
     if d.ndim != 3 or affine.shape != (4, 4) or not np.all(np.isfinite(affine)):
         raise ValueError("density must be 3-D with a finite 4x4 affine")
-    if not np.all(np.isfinite(d)) or d.min() < 0:
-        raise ValueError("density must be finite and non-negative")
     scalars = {k: (np.asarray(v.dataobj, float), v.affine) if hasattr(v, "affine")
                else (np.asarray(v[0], float), np.asarray(v[1], float)) for k, v in scalars.items()}
     info = dict(floor=floor)

@@ -133,7 +133,7 @@ def tract_profiles(density, affine, core, scalars, n_nodes=100, floor=1e-6):
     ijk, owner = _assign(dn, _support(dn, floor), affine, core)
     t.append(time.perf_counter())
     x = nib.affines.apply_affine(affine, ijk)
-    w, fallback = _weights(x, d[tuple(ijk.T)], owner, n)
+    w, fallback = _weights(x, dn[tuple(ijk.T)], owner, n)   # density / peak: same estimator
     t.append(time.perf_counter())
     out = {}
     for name, (data, aff) in scalars.items():

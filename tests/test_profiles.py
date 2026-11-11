@@ -17,7 +17,8 @@ from mcat.profiles import _assign, _mahalanobis, _weights, tract_profiles, write
 # --- weighted geometry and estimator --------------------------------------------------------
 
 # pyAFQ's test_mahal_fix: 20 streamlines, two nodes each, and the Mahalanobis distances pyAFQ
-# pins for the first three streamlines.  https://github.com/tractometry/pyAFQ/blob/65a43a88ff1cf1e681a04a47010c9bb8dbb07ed8/AFQ/tests/test_fixes.py#L55-L91
+# pins for the first three streamlines:
+# https://github.com/tractometry/pyAFQ/blob/65a43a88ff1cf1e681a04a47010c9bb8dbb07ed8/AFQ/tests/test_fixes.py#L55-L91
 MAHAL_SLS = np.array([
     [[30, 41, 61], [28, 61, 38]], [[30, 41, 62], [20, 44, 34]], [[50, 67, 88], [10, 10, 20]],
     [[35, 43, 65], [25, 55, 35]], [[40, 50, 70], [15, 15, 25]], [[45, 54, 75], [12, 22, 32]],
@@ -221,7 +222,8 @@ def test_profile_end_to_end():
     s_data = field(nib.affines.apply_affine(s_aff, np.moveaxis(np.indices(s_data.shape, float), 0, -1)))
     holes = s_data.copy()
     holes[...] = np.nan                                   # an all-invalid scalar
-    prof, info = tract_profiles(d, aff, core, {"lin": nib.Nifti1Image(s_data, s_aff), "none": nib.Nifti1Image(holes, s_aff)})
+    scalars = {"lin": nib.Nifti1Image(s_data, s_aff), "none": nib.Nifti1Image(holes, s_aff)}
+    prof, info = tract_profiles(d, aff, core, scalars)
     assert prof["lin"].shape == (10,) and np.all(np.isnan(prof["none"]))
     # each node's profile is a convex combination of a linear field over its own slab of the tube
     npt.assert_allclose(prof["lin"], field(core), atol=0.12)

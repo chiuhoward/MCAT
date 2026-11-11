@@ -238,6 +238,8 @@ def test_empty_bundle_returns_nan_nodes():
     prof, info = tract_profiles(np.zeros_like(d), aff, None, {"FA": nib.Nifti1Image(d, aff)}, n_nodes=7)
     assert prof["FA"].shape == (7,) and np.all(np.isnan(prof["FA"]))
     assert info["status"] == "empty"
+    prof, info = tract_profiles(d, aff, None, {"FA": nib.Nifti1Image(d, aff)}, n_nodes=7)
+    assert np.all(np.isnan(prof["FA"])) and info["status"] == "no core"   # write_cores found none
 
 
 @pytest.mark.parametrize("bad", [-1.0, np.nan, np.inf])
@@ -249,7 +251,7 @@ def test_invalid_density_is_zero_as_in_bundle_core(bad):
     d_bad = d.copy()
     d_bad[5, 3, 3] = bad
     expected = np.clip(np.nan_to_num(d_bad), 0, None)
-    prof, info = tract_profiles(d_bad, aff, core, lin)
+    prof, _ = tract_profiles(d_bad, aff, core, lin)
     ref, _ = tract_profiles(expected, aff, core, lin)
     npt.assert_array_equal(prof["x"], ref["x"])
 

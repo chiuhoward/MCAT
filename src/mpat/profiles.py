@@ -95,13 +95,14 @@ def tract_profiles(density, affine, core, scalars, n_nodes=100, floor=1e-6):
     """Profiles of one bundle: ({scalar: (n,) values}, info).
 
     density   3-D bundle density map (NaN / negative read as 0, as bundle_core does)
-    core      (n, 3) core nodes in world mm (``Core.xyz``), or None for an empty bundle
+    core      (n, 3) core nodes in world mm (``Core.xyz``), or None when there is none
     scalars   {name: nibabel image}
     n_nodes   the node count when there is no core; otherwise the core's own count is kept
     """
     d = np.clip(np.nan_to_num(np.asarray(density, float)), 0, None)   # as bundle_core
-    if d.max() <= 0:
-        return {k: np.full(n_nodes, np.nan) for k in scalars}, dict(status="empty")
+    if d.max() <= 0 or core is None:
+        status = "empty" if d.max() <= 0 else "no core"
+        return {k: np.full(n_nodes, np.nan) for k in scalars}, dict(status=status)
     n = len(core)
     dn = d / d.max()
     ijk, owner = _assign(dn, _support(dn, floor), affine, core)
@@ -119,39 +120,31 @@ def tract_profiles(density, affine, core, scalars, n_nodes=100, floor=1e-6):
     return out, dict(status="ok", n_support=len(owner), empty_nodes=np.flatnonzero(count == 0).tolist())
 
 
-def write_profiles(folder, scalars, out=None, n_nodes=100, floor=1e-6):
+def write_profiles(folder, scalars):
     """Profiles of every MCAT bundle under ``folder`` from its saved core (``write_cores``), as
     pyAFQ-style ``<stem>_desc-profiles_tractography.csv`` (tractID, nodeID, one column per scalar;
-    missing values empty) and a ``.json`` with the method and each bundle's status.
+    missing values empty) and a ``.json`` with each bundle's status.
 
     scalars   {column name: path of a scalar image}, e.g. pyAFQ's exported ``dti_fa``
     """
     files = bundle_files(str(folder))
-    if not files:
-        raise ValueError(f"no MCAT density maps under {folder}")
-    if out is None:
-        out = next(iter(files.values()))["prefix"].split("_bundle-")[0] + "_desc-profiles_tractography.csv"
+    out = next(iter(files.values()))["prefix"].split("_bundle-")[0] + "_desc-profiles_tractography.csv"
     images = {k: nib.load(p) for k, p in scalars.items()}
     rows, meta = [], {}
     for key, f in files.items():
         summary = f["prefix"] + "_desc-summary.json"
         name = json.load(open(summary)).get("bundle", key) if op.exists(summary) else key
         img = nib.load(f["density"])
-        d = np.asarray(img.dataobj, float)
         core_tsv = f["prefix"] + "_desc-core_path.tsv"
         core = np.loadtxt(core_tsv, skiprows=1, usecols=(1, 2, 3), ndmin=2) if op.exists(core_tsv) else None
-        if core is None and d.max() > 0:
-            prof, info = {k: np.full(n_nodes, np.nan) for k in images}, dict(status="no core")
-        else:
-            prof, info = tract_profiles(d, img.affine, core, images, n_nodes, floor)
-        meta[name] = dict(info, density=f["density"], core=core_tsv if core is not None else None)
-        for i in range(n_nodes if core is None else len(core)):
-            rows.append([name, i] + ["" if np.isnan(prof[k][i]) else repr(float(prof[k][i])) for k in images])
+        prof, meta[name] = tract_profiles(img.dataobj, img.affine, core, images)
+        for i, values in enumerate(zip(*prof.values())):
+            rows.append([name, i] + ["" if np.isnan(v) else repr(float(v)) for v in values])
     with open(out, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["tractID", "nodeID", *images])
         w.writerows(rows)
     with open(out[: -len(".csv")] + ".json", "w") as fh:
         json.dump(dict(method="mcat.profiles (see its docstring); nodeID 0 is the core's start end",
-                       floor=floor, scalars={k: str(p) for k, p in scalars.items()}, bundles=meta), fh, indent=1)
+                       scalars={k: str(p) for k, p in scalars.items()}, bundles=meta), fh, indent=1)
     return out

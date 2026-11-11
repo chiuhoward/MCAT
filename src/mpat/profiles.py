@@ -13,7 +13,9 @@ For one bundle and its core (``mcat.core``, n nodes in world mm):
    voxels x vox_mm) x (that voxel's cost).  Nodes are
    never moved, merged or renumbered: a node whose cell has no support corner (detached), one that
    coincides with another (an exact tie goes to whichever SciPy's Dijkstra settles first), or one
-   closer to its neighbours than a voxel, can own no voxels -- its profile is NaN.
+   closer to its neighbours than a voxel, can own no voxels -- its profile is NaN, and info lists it
+   in ``empty_nodes``.  With 100 nodes on 2 mm voxels that is about half the nodes of a 100 mm
+   bundle (pyAFQ has no such case: it interpolates scalars along resampled streamlines).
 3. Weights (issue 6).  For node n's voxels, with density d_i at voxel centre x_i (mm): the
    density-weighted mean mu and population covariance S, the Mahalanobis distance
    D_i = sqrt((x_i - mu)' pinvh(S) (x_i - mu)) (SciPy's default eigenvalue cutoff, so thin rank-1

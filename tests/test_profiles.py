@@ -129,7 +129,8 @@ def _u_bundle():
 def test_assignment_follows_the_bundle_not_straight_lines():
     keep, nodes_vox = _u_bundle()
     aff = np.diag([2.0, 2.0, 2.0, 1.0])
-    ijk, owner = _assign(keep, aff, nodes_vox @ aff[:3, :3].T)
+    # uniform density: MCAT's cost is zero, so its 1e-9-per-step tie-break counts steps
+    ijk, owner = _assign(keep.astype(float), keep, aff, nodes_vox @ aff[:3, :3].T)
     assert np.all(owner >= 0)
     arm_of_node = np.array([1, 1, 1, -1, 3, 3, 3])
     checked = wrong_by_euclid = 0
@@ -148,13 +149,25 @@ def test_assignment_follows_the_bundle_not_straight_lines():
     assert checked > 20 and wrong_by_euclid > 0           # the case discriminates
 
 
-def test_assignment_uses_physical_lengths():
-    """Voxel (2,0,0) on a (1, 1, 4) mm grid is 2 mm from node A and 4.1 mm from node B; in
-    voxel units (or one mean voxel size) B looks nearer."""
-    keep = np.ones((4, 1, 2), bool)
+def test_assignment_uses_mcats_density_cost():
+    """MCAT's cross-section metric (core.py step 3): -log(density / peak) per mm.  A line of
+    voxels x = 0..10, density 0.01 for x <= 3 and 1 beyond, nodes at x = 2 and x = 8.  By hand,
+    with c = -ln(0.01) = 4.61: voxel 3 costs c x 1 mm = 4.61 from node 0, but only
+    0 (x = 8..4) + (0 + c) / 2 = 2.30 from node 1, so node 1 owns it -- physical length says node 0."""
+    dn = np.where(np.arange(11) <= 3, 0.01, 1.0)[:, None, None]
+    keep = np.ones(dn.shape, bool)
+    ijk, owner = _assign(dn, keep, np.eye(4), np.array([[2.0, 0, 0], [8.0, 0, 0]]))
+    npt.assert_array_equal(owner[np.argsort(ijk[:, 0])], [0, 0, 0] + [1] * 8)
+
+
+def test_assignment_steps_are_physical_mm():
+    """The cost is per mm of the affine's linear part, not per voxel (or one mean voxel size).
+    On a (1, 1, 4) mm grid with uniform cost, voxel (2,0,0) is 2 mm from node A at (0,0,0) and
+    4.1 mm from node B at voxel (3,0,1); in voxels B is nearer (one diagonal step)."""
+    dn = np.full((4, 1, 2), 0.5)
+    dn[0, 0, 1] = 1.0                                     # the peak: elsewhere cost is ln 2 per mm
     aff = np.diag([1.0, 1.0, 4.0, 1.0])
-    nodes = np.array([[0, 0, 0], [3, 0, 4.0]])          # voxel (0,0,0) and (3,0,1), in mm
-    ijk, owner = _assign(keep, aff, nodes)
+    ijk, owner = _assign(dn, dn > 0, aff, np.array([[0, 0, 0], [3, 0, 4.0]]))
     assert owner[np.flatnonzero((ijk == [2, 0, 0]).all(1))[0]] == 0
 
 
@@ -162,7 +175,7 @@ def test_duplicate_and_detached_nodes_keep_their_numbers():
     keep, nodes_vox = _u_bundle()
     nodes_vox = np.vstack([nodes_vox[:2], nodes_vox[1:2], nodes_vox[2:], [[10, 4.8, 2.5]]])
     aff = np.eye(4)
-    _, owner = _assign(keep, aff, nodes_vox)
+    _, owner = _assign(keep.astype(float), keep, aff, nodes_vox)
     counts = np.bincount(owner[owner >= 0], minlength=len(nodes_vox))
     # nodes 1 and 2 coincide: one owns their voxels, the other is empty; the last node has no
     # support voxel at any corner of its cell (detached) and is empty too

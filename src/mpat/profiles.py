@@ -4,11 +4,12 @@ For one bundle and its core (``mcat.core``, n nodes in world mm):
 
 1. Support.  The voxels ``bundle_core`` builds its graph on: density above ``floor`` x peak, in
    the connected component that holds the peak.  Disconnected islands are left out.
-2. Assignment.  Every support voxel goes to the core node nearest to it along the bundle: one
-   multi-source Dijkstra over the support's 26-neighbour graph, with physical step lengths
-   |A[:3, :3] @ offset| mm (no density in the cost, so the cross-sections are purely geometric and
-   density enters only through the weights).  A node enters the graph through the support voxels
-   at the eight corners of the voxel cell it lies in, at its distance in mm from each.  Nodes are
+2. Assignment.  Every support voxel goes to the core node nearest to it along the bundle, in the
+   metric of MCAT's own cross-sections (``bundle_core`` step 3): -log(density / peak) per mm on the
+   support's 26-neighbour graph, plus its 1e-9-per-step tie-break -- one multi-source Dijkstra.
+   Step lengths are |A[:3, :3] @ offset| mm (the same as bundle_core's on isotropic grids, correct
+   on anisotropic or sheared ones).  A node enters the graph through the support voxels at the
+   eight corners of the voxel cell it lies in, at (distance in mm) x (that voxel's cost).  Nodes are
    never moved, merged or renumbered: a node whose cell has no support corner (detached), one that
    coincides with another (an exact tie goes to whichever SciPy's Dijkstra settles first), or one
    closer to its neighbours than a voxel, can own no voxels -- its profile is NaN.
@@ -38,13 +39,14 @@ ZERO_DISTANCE = "pyAFQ: w = d / D, and 0 where D == 0; a node with no positive w
 CELL = np.array([(i, j, k) for i in (0, 1) for j in (0, 1) for k in (0, 1)])
 
 
-def _assign(keep, affine, xyz):
+def _assign(dn, keep, affine, xyz):
     """(ijk (m, 3) support voxels, owner (m,) node index or -1) -- see step 2."""
     import scipy.sparse as sps
     from scipy.sparse.csgraph import dijkstra
 
     A = affine[:3, :3]
-    G, idx, lin = _graph(np.ones(keep.shape), keep, None, A)
+    cost = np.where(keep, -np.log(np.where(keep, dn, 1.0)), 0.0)   # as bundle_core's cost1
+    G, idx, lin = _graph(cost, keep, None, A)
     m, n = len(idx), len(xyz)
     ijk = nib.affines.apply_affine(np.linalg.inv(affine), xyz)
     corner = np.floor(ijk).astype(np.int64)[:, None] + CELL            # (n, 8, 3)
@@ -53,7 +55,9 @@ def _assign(keep, affine, xyz):
     vox[inside] = lin[tuple(corner[inside].T)]
     on = vox >= 0
     mm = np.linalg.norm((corner - ijk[:, None]) @ A.T, axis=-1)
-    E = sps.csr_matrix((mm[on] + 1e-9, (m + np.nonzero(on)[0], vox[on])), shape=(m + n, m + n))
+    c = np.zeros(vox.shape)
+    c[on] = cost[tuple(idx[vox[on]].T)]
+    E = sps.csr_matrix((mm[on] * c[on] + 1e-9, (m + np.nonzero(on)[0], vox[on])), shape=(m + n, m + n))
     G = sps.block_diag((G, sps.csr_matrix((n, n)))).tocsr() + E
     dist, _, src = dijkstra(G, indices=m + np.arange(n), min_only=True, return_predecessors=True)
     return idx, np.where(np.isfinite(dist[:m]), src[:m] - m, -1)
@@ -126,7 +130,8 @@ def tract_profiles(density, affine, core, scalars, n_nodes=100, floor=1e-6):
     n = len(core)
 
     t = [time.perf_counter()]
-    ijk, owner = _assign(_support(d / d.max(), floor), affine, core)
+    dn = d / d.max()
+    ijk, owner = _assign(dn, _support(dn, floor), affine, core)
     t.append(time.perf_counter())
     x = nib.affines.apply_affine(affine, ijk)
     w, fallback = _weights(x, d[tuple(ijk.T)], owner, n)
@@ -183,6 +188,8 @@ def write_profiles(folder, scalars, out=None, n_nodes=100, floor=1e-6):
     with open(out[: -len(".csv")] + ".json", "w") as fh:
         json.dump(dict(method="density-weighted inverse Mahalanobis distance over geodesic "
                               "cross-sections of the MCAT core (mcat.profiles)",
+                       assignment="nearest core node in bundle_core's cross-section metric: "
+                                  "-log(density / peak) per mm (affine step lengths)",
                        zero_distance=ZERO_DISTANCE, pseudoinverse="scipy.linalg.pinvh default cutoff",
                        support=f"density > {floor} x peak, component holding the peak",
                        node_order="nodeID 0 is the core's first node (its start end: see its json 'ends')",

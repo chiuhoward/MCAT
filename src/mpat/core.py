@@ -64,7 +64,7 @@ def _resample(xyz, n):
 
 def _support(dn, floor):
     """Voxels with density above floor x peak, in the connected component holding the peak
-    (moved unchanged out of bundle_core, which mcat.profiles shares it with)."""
+    (moved unchanged out of bundle_core, which mpat.profiles shares it with)."""
     from scipy.ndimage import label
 
     lab, _ = label(dn > floor, np.ones((3, 3, 3)))

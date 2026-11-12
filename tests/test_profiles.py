@@ -1,6 +1,6 @@
-"""Tract profiles from MCAT density maps (mcat.profiles; rokemlab/MCAT issue 6).
+"""Tract profiles from MPAT density maps (mpat.profiles; rokemlab/MPAT issue 6).
 
-Expected values come from outside mcat.profiles: pyAFQ's own Mahalanobis weighting (and the
+Expected values come from outside mpat.profiles: pyAFQ's own Mahalanobis weighting (and the
 numbers pinned in pyAFQ's ``test_mahal_fix``), hand calculation, and geometry simple enough to
 know each voxel's node without a shortest-path search.
 """
@@ -12,7 +12,7 @@ import numpy as np
 import numpy.testing as npt
 import pytest
 
-from mcat.profiles import _assign, _mahalanobis, _weights, tract_profiles, write_profiles
+from mpat.profiles import _assign, _mahalanobis, _weights, tract_profiles, write_profiles
 
 # --- weighted geometry and estimator --------------------------------------------------------
 
@@ -128,7 +128,7 @@ def _u_bundle():
 def test_assignment_follows_the_bundle_not_straight_lines():
     keep, nodes_vox = _u_bundle()
     aff = np.diag([2.0, 2.0, 2.0, 1.0])
-    # uniform density: MCAT's cost is zero, so its 1e-9-per-step tie-break counts steps
+    # uniform density: MPAT's cost is zero, so its 1e-9-per-step tie-break counts steps
     ijk, owner = _assign(keep.astype(float), keep, aff, nodes_vox @ aff[:3, :3].T)
     assert np.all(owner >= 0)
     arm_of_node = np.array([1, 1, 1, -1, 3, 3, 3])
@@ -148,8 +148,8 @@ def test_assignment_follows_the_bundle_not_straight_lines():
     assert checked > 20 and wrong_by_euclid > 0           # the case discriminates
 
 
-def test_assignment_uses_mcats_density_cost():
-    """MCAT's cross-section metric (core.py step 3): -log(density / peak) per mm.  A line of
+def test_assignment_uses_mpats_density_cost():
+    """MPAT's cross-section metric (core.py step 3): -log(density / peak) per mm.  A line of
     voxels x = 0..10, density 0.01 for x <= 3 and 1 beyond, nodes at x = 2 and x = 8.  By hand,
     with c = -ln(0.01) = 4.61: voxel 3 costs c x 1 mm = 4.61 from node 0, but only
     0 (x = 8..4) + (0 + c) / 2 = 2.30 from node 1, so node 1 owns it -- physical length says node 0."""
@@ -159,7 +159,7 @@ def test_assignment_uses_mcats_density_cost():
     npt.assert_array_equal(owner[np.argsort(ijk[:, 0])], [0, 0, 0] + [1] * 8)
 
 
-def test_assignment_steps_match_mcat():
+def test_assignment_steps_match_mpat():
     """Step lengths are bundle_core's: |offset| x vox_mm, vox_mm = |det A|^(1/3) (one mean voxel
     size), including the step from a node to its cell's corners.  On a (1, 1, 4) mm grid vox_mm =
     4^(1/3) = 1.587, and with cost c = ln 2 off the peak, by hand: voxel (2,0,0) is one diagonal
@@ -259,7 +259,7 @@ def test_invalid_density_is_zero_as_in_bundle_core(bad):
 
 
 def test_write_profiles(tmp_path):
-    from mcat.core import Core, write_core
+    from mpat.core import Core, write_core
 
     d, aff, core = _straight_bundle()
     stem = tmp_path / "sub-01_dwi_space-RASMM_model-probCSD"

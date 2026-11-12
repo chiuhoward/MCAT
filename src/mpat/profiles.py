@@ -1,11 +1,11 @@
-"""Tract profiles: scalar values along a bundle's core, from its MCAT density map.
+"""Tract profiles: scalar values along a bundle's core, from its MPAT density map.
 
-For one bundle and its core (``mcat.core``, n nodes in world mm):
+For one bundle and its core (``mpat.core``, n nodes in world mm):
 
 1. Support.  The voxels ``bundle_core`` builds its graph on: density above ``floor`` x peak, in
    the connected component that holds the peak.  Disconnected islands are left out.
 2. Assignment.  Every support voxel goes to the core node nearest to it along the bundle, in the
-   metric of MCAT's own cross-sections (``bundle_core`` step 3): -log(density / peak) per mm on the
+   metric of MPAT's own cross-sections (``bundle_core`` step 3): -log(density / peak) per mm on the
    support's 26-neighbour graph, plus its 1e-9-per-step tie-break -- one multi-source Dijkstra.
    Step lengths are bundle_core's too: |offset in voxels| x vox_mm, vox_mm = |det A|^(1/3) (exact
    on isotropic grids, a mean voxel size on anisotropic ones).  A node enters the graph through the
@@ -23,7 +23,7 @@ For one bundle and its core (``mcat.core``, n nodes in world mm):
    voxel exactly at mu (an infinite inverse distance) gets zero weight.  A node whose weights are
    all zero (one voxel: no covariance) is weighted by density alone.
 4. Profile.  P_n = sum w_i s_i / sum w_i over node n's voxels with a finite scalar s_i; NaN if
-   there are none.  Scalars are put on the density grid with MCAT's ``afq._on_grid`` (linear, as
+   there are none.  Scalars are put on the density grid with MPAT's ``afq._on_grid`` (linear, as
    pyAFQ's tracker).  Edge case: bundle voxels outside a scalar's grid read 0 there, not missing.
 """
 from __future__ import annotations
@@ -124,7 +124,7 @@ def tract_profiles(density, affine, core, scalars, n_nodes=100, floor=1e-6):
 
 
 def write_profiles(folder, scalars):
-    """Profiles of every MCAT bundle under ``folder`` from its saved core (``write_cores``), as
+    """Profiles of every MPAT bundle under ``folder`` from its saved core (``write_cores``), as
     pyAFQ-style ``<stem>_desc-profiles_tractography.csv`` (tractID, nodeID, one column per scalar;
     missing values empty) and a ``.json`` with each bundle's status.
 
@@ -148,6 +148,6 @@ def write_profiles(folder, scalars):
         w.writerow(["tractID", "nodeID", *images])
         w.writerows(rows)
     with open(out[: -len(".csv")] + ".json", "w") as fh:
-        json.dump(dict(method="mcat.profiles (see its docstring); nodeID 0 is the core's start end",
+        json.dump(dict(method="mpat.profiles (see its docstring); nodeID 0 is the core's start end",
                        scalars={k: str(p) for k, p in scalars.items()}, bundles=meta), fh, indent=1)
     return out

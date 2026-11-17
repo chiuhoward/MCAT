@@ -18,6 +18,7 @@ dependencies = [
 
 [project.optional-dependencies]
 viewer = ["ipyniivue>=2.4"]
+ss3t = ["cs_dmri>=0.3.1"]   # mpat.ss3t: single-shell three-tissue CSD fODFs
 test = ["pytest>=8"]
 docs = [
     "sphinx>=7.3", "myst-parser>=3", "pydata-sphinx-theme>=0.15", "sphinx-design",

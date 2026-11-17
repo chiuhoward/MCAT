@@ -12,7 +12,7 @@ pyAFQ provides the fODF, tissue, seeds, bundle definitions and warped ROIs.
     mpat.run(afq, n_proc=8, max_mem="16GB")            # -> <output_dir>/mpat/
     mpat.view(f"{output_dir}/mpat", bundles=["LeftArcuate"])   # in a notebook
 """
-from .afq import run
+from .afq import run, run_from_images
 from .chain import Chain, ChainConfig
 from .connectome import ConnectomeResult, build_connectome
 from .core import bundle_core
@@ -34,6 +34,6 @@ def view(*args, **kwargs):
 __all__ = ["BundleFields", "BundleQuantification", "Chain", "ChainConfig", "ConnectomeResult",
            "DirectedFixelChain", "afd_tract_metrics", "build_connectome", "bundle_core",
            "class_chord_lengths", "endpoint_patches", "fixel_streamlines", "flux_orientation",
-           "prepare_launches", "quantify_bundle", "restrict_endpoints", "run", "save_html",
+           "prepare_launches", "quantify_bundle", "restrict_endpoints", "run", "run_from_images", "save_html",
            "segment_bundles", "segment_lobes", "sift2_optimize_launches", "solve_bundle_cascade",
            "view", "write_fixel_directory"]

@@ -141,3 +141,49 @@ def test_missing_cs_dmri(monkeypatch):
     monkeypatch.setitem(sys.modules, "cs_dmri", None)
     with pytest.raises(ImportError, match=r"mpat-tractography\[ss3t\]"):
         fit_ss3t("dwi.nii.gz", "dwi.bval", "dwi.bvec", "mask.nii.gz", "out")
+
+
+def test_run_from_images(tmp_path, monkeypatch):
+    """SS3T fODF -> MPAT bundles from explicit files only (no pyAFQ: importing it fails here):
+    the synthetic subject's DWI, its CSF / GM / WM probabilities as separate files on the finer
+    T1 grid, a seed mask and the bundles' ROI files.  Each bundle stays in its own band, and the
+    seeds given are the ones used."""
+    import sys
+
+    pytest.importorskip("cs_dmri")
+    from nibabel.processing import resample_from_to
+    from synthetic_subject import make_subject
+
+    import mpat
+    from mpat.ss3t import fit_ss3t
+
+    f = make_subject(tmp_path / "raw")
+    dwi = nib.load(f["dwi"])
+    mask = resample_from_to(nib.load(f["mask"]), (dwi.shape[:3], dwi.affine), order=0)
+    nib.save(mask, tmp_path / "mask_dwi.nii.gz")
+    fodf = fit_ss3t(f["dwi"], f["bval"], f["bvec"], tmp_path / "mask_dwi.nii.gz", tmp_path / "fit" / "sub-01")["wm"]
+    bundles = [dict(name=k, **v) for k, v in f["rois"].items()]
+    monkeypatch.setitem(sys.modules, "AFQ", None)
+
+    def run(seeds, out):
+        seed_file = tmp_path / f"{out}_seeds.nii.gz"
+        nib.save(nib.Nifti1Image(seeds.astype(np.uint8), f["affine"]), seed_file)
+        res = mpat.run_from_images(fodf, f["pves"], f["mask"], seed_file, bundles, tmp_path / out, n_proc=2,
+                                   max_mem="2GB", viz=False)
+        return res, tmp_path / out
+
+    res, out = run(f["wm"], "both")
+    dseg = nib.load(out / "sub-01_desc-mpat_dseg.nii.gz")
+    np.testing.assert_allclose(dseg.affine, f["affine"])
+    assert (np.asarray(dseg.dataobj)[f["A"] & ~f["B"]][:, None] == 1).mean() > 0.5    # WM is WM: channel order
+    for b, own in (("A", f["A"]), ("B", f["B"])):
+        assert res[b].info["expected_bundle_streamlines"] > 10
+        assert res[b].info["endpoint_mass_check"] == pytest.approx(1.0, abs=1e-6)
+        d = nib.load(out / f"sub-01_bundle-{b}_desc-density_map.nii.gz")
+        np.testing.assert_allclose(d.affine, f["affine"])
+        assert d.get_fdata()[own].sum() > 0.99 * d.get_fdata().sum()
+        assert (out / f"sub-01_bundle-{b}_desc-endpoints_map.nii.gz").exists()
+    assert (out / "sub-01_desc-mpat_table.tsv").exists()
+    res_a, _ = run(f["A"] & ~f["B"], "seedsA")                  # seeds only in band A
+    assert res_a["B"].info["expected_bundle_streamlines"] < 1e-3 * res["B"].info["expected_bundle_streamlines"]
+    assert res_a["A"].info["expected_bundle_streamlines"] > 10

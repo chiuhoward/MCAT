@@ -3,7 +3,8 @@
 tissue PVE and brain mask, the white/grey-matter interface (seeds), the bundle
 definitions, and their ROIs warped to the subject.  Outputs go to ``<output_dir>/mpat``
 (``mpat-moments`` with spatial moments), next to pyAFQ's own, or to ``out_dir`` (pyAFQ's
-derivatives are then only read).
+derivatives are then only read).  ``run_from_images`` runs the same chain and solves from
+image files alone (an fODF, tissue probabilities, masks and subject-space ROIs), without pyAFQ.
 """
 from __future__ import annotations
 
@@ -662,29 +663,50 @@ def run(afq, n_proc, max_mem="auto", bundles=None, moments=False, tol=1e-6, angl
         sh_path = afq.export(f"{afq.export('tracking_params')['odf_model'].lower()}_params")
         sh_img = nib.load(sh_path)
         pve_img, bm_img = nib.load(afq.export("pve_internal")), nib.load(afq.export("brain_mask"))
-    with clock("tissue labels"):
-        transient, absorb, dseg = tissue_labels(sh_img, pve_img, bm_img)
+        seed_img = nib.load(afq.export("wm_gm_interface"))
+        # pyAFQ's tissue from SynthSeg: its thalami stand in for the template's thalamic ROIs
+        thal = _thalami_if_synthseg(afq, sh_img, synthseg_thalamus)
     out = mpat_dir(afq, moments, out_dir)
     out.mkdir(parents=True, exist_ok=True)
     stem = str(out / Path(afq.kwargs["base_fname"]).name)
-    nib.save(nib.Nifti1Image(dseg, sh_img.affine), f"{stem}_desc-mpat_dseg.nii.gz")
-    # pyAFQ's tissue from SynthSeg: its thalami stand in for the template's thalamic ROIs
-    with clock("pyAFQ inputs"):
-        thal = _thalami_if_synthseg(afq, sh_img, synthseg_thalamus)
 
-    def specs():
+    def specs(transient):
         # each bundle's ROIs warped just before its group is solved, its ROI masks written then
         # (the solve keeps what it needs, so the ROIs can go)
         yield from roi_specs(afq, sh_img, transient, stem, bundles, thal, no_midline, midline_tol, fornix)
 
+    results = _segment(sh_img, pve_img, bm_img, seed_img, specs, stem, clock, max_mem=max_mem, moments=moments,
+                       tol=tol, angle=angle, double_odf=double_odf, cores=cores, max_length=max_length,
+                       verbose=verbose, flux=flux, fixels=fixels)
+    t_viz = time.perf_counter()
+    if viz:
+        try:
+            t1 = afq.export("t1_masked")
+        except Exception:  # noqa: BLE001 -- the collage falls back to the tissue labels
+            t1 = None
+        visualize(out, stem, [re.sub(r"[^A-Za-z0-9]", "", n) for n in results], sh_path, t1=t1, rois=viz_rois)
+        clock.add("viz", time.perf_counter() - t_viz)
+    clock.report("MPAT time per stage", time.time() - t0)
+    log.info("MPAT: %d bundles in %.0fs -> %s", len(results), time.time() - t0, out)
+    return results
+
+
+def _segment(sh_img, pve_img, bm_img, seed_img, specs, stem, clock, max_mem="auto", moments=False, tol=1e-6,
+             angle=35.0, double_odf=True, cores=True, max_length=250.0, verbose=False, flux=False, fixels=False):
+    """run's chain and solves, from images: tissue labels, the chain, seeds (``seed_img`` within
+    the walkable white matter), the bundles of ``specs(transient)``, and every per-bundle
+    output, the table and the cores written at ``stem``.  Returns {bundle: BundleResult}."""
+    with clock("tissue labels"):
+        transient, absorb, dseg = tissue_labels(sh_img, pve_img, bm_img)
+    nib.save(nib.Nifti1Image(dseg, sh_img.affine), f"{stem}_desc-mpat_dseg.nii.gz")
+    out = Path(stem).parent
     cfg = ChainConfig(angle=angle, double_odf=double_odf, moments=moments)
     with clock("fODF load"):
         sh = np.asarray(sh_img.dataobj, np.float32)
     with clock("chain build / cache"):
         chain = Chain.build(sh, sh_img.header.get_zooms()[:3], transient, absorb, cfg,
                             cache=f"{stem}_desc-chain_cache.npz")
-    with clock("pyAFQ inputs"):
-        seeds = np.argwhere((_on_grid(nib.load(afq.export("wm_gm_interface")), sh_img, 0) > 0) & transient)
+    seeds = np.argwhere((_on_grid(seed_img, sh_img, 0) > 0) & transient)
     t_ol = time.perf_counter()
     if max_length and max_length > 0:
         t1_ = time.time()
@@ -790,7 +812,7 @@ def run(afq, n_proc, max_mem="auto", bundles=None, moments=False, tol=1e-6, angl
         rows.append(row)
         log.info("%s: %.2f expected streamlines", res.name, i["expected_bundle_streamlines"])
 
-    results = segment_bundles(chain, specs(), launches, tol=tol, max_mem=budget, on_result=write,
+    results = segment_bundles(chain, specs(transient), launches, tol=tol, max_mem=budget, on_result=write,
                               on_trapped=trapped, verbose=verbose, clock=clock, keep_fields=flux)
     if fixels:
         with clock("fixels"):
@@ -804,13 +826,48 @@ def run(afq, n_proc, max_mem="auto", bundles=None, moments=False, tol=1e-6, angl
         from .core import write_cores
         with clock("cores"):
             write_cores(out)
-    t_viz = time.perf_counter()
+    return results
+
+
+def run_from_images(fodf, tissue, brain_mask, seeds, bundles, out_dir, n_proc, max_mem="auto", tol=1e-6,
+                    angle=35.0, double_odf=True, max_length=250.0, viz=True, t1=None):
+    """Segment bundles with MPAT from image files alone (tissue and masks may also be nibabel
+    images), without pyAFQ.
+
+    fodf        WM fODF file: SH, DIPY descoteaux07 (legacy), directions in the image's voxel axes
+                (mpat.ss3t.fit_ss3t writes one; so does pyAFQ's CSD).  MPAT works on its grid
+    tissue      anatomical tissue probabilities: a 4-D image of (CSF, GM, WM), or three images
+                in that order
+    brain_mask, seeds  masks, e.g. the white / grey-matter interface as seeds
+    bundles     [{"name", "include": [masks], "exclude": mask, "start": mask, "end": mask}],
+                masks used as given (nothing grown, sealed or added)
+    t1          optional background for the collage
+    The other arguments are run's.  Outputs: <out_dir>/<fODF file name up to "_model-">_*, as
+    run's.  Returns {bundle: BundleResult}."""
+    import numba
+
+    numba.set_num_threads(max(1, min(int(n_proc), numba.config.NUMBA_NUM_THREADS)))
+    t0 = time.time()
+    clock = Clock()
+    load = lambda x: nib.load(x) if isinstance(x, (str, Path)) else x  # noqa: E731
+    sh_img = load(fodf)
+    if isinstance(tissue, (list, tuple)):
+        tissue = nib.Nifti1Image(np.stack([_on_grid(load(t), sh_img) for t in tissue], -1), sh_img.affine)
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    stem = str(out / re.split(r"_model-|\.nii", Path(sh_img.get_filename()).name)[0])
+
+    def specs(transient):
+        mask = lambda m: _on_grid(load(m), sh_img, order=0) > 0  # noqa: E731
+        for b in bundles:
+            yield dict(name=b["name"], include=[mask(m) for m in b.get("include", [])],
+                       **{k: mask(b[k]) for k in ("exclude", "start", "end") if b.get(k) is not None})
+
+    results = _segment(sh_img, load(tissue), load(brain_mask), load(seeds), specs, stem, clock, max_mem=max_mem,
+                       tol=tol, angle=angle, double_odf=double_odf, max_length=max_length)
     if viz:
-        try:
-            t1 = afq.export("t1_masked")
-        except Exception:  # noqa: BLE001 -- the collage falls back to the tissue labels
-            t1 = None
-        visualize(out, stem, [re.sub(r"[^A-Za-z0-9]", "", n) for n in results], sh_path, t1=t1, rois=viz_rois)
+        t_viz = time.perf_counter()
+        visualize(str(out), stem, [re.sub(r"[^A-Za-z0-9]", "", n) for n in results], sh_img.get_filename(), t1=t1)
         clock.add("viz", time.perf_counter() - t_viz)
     clock.report("MPAT time per stage", time.time() - t0)
     log.info("MPAT: %d bundles in %.0fs -> %s", len(results), time.time() - t0, out)
